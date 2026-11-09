@@ -59,6 +59,9 @@ textarea:focus{border-color:var(--accent)}
 .btn.danger{border-color:var(--line);background:transparent;color:var(--muted)}
 body.view .mic,body.view .actions,body.view .hint,body.view .nosupport,body.view .status{display:none!important}
 body.view textarea{padding-right:12px;resize:none}
+.docbox{margin-top:22px;background:var(--accent-soft);border-radius:14px;padding:16px}
+.docbox p{font-size:14px;color:var(--ink);margin:10px 0 0}
+.docbox a{color:var(--accent)}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:.25s}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 @media (max-width:480px){.wrap{padding-top:28px}.q{padding:14px}.btn{flex:1 1 100%}}
@@ -346,7 +349,44 @@ window.addEventListener("hashchange", () => location.reload());
   });
   updateProgress();
   document.getElementById("saved").textContent = "";
+  const box = document.createElement("div");
+  box.className = "docbox";
+  box.innerHTML = `<button class="btn" id="mkdoc">Створити Google Doc</button>
+    <p id="docsteps">Відповіді скопіюються, а в новій вкладці відкриється порожній Google Doc — натисніть у ньому <b>Ctrl+V</b> (на Mac <b>⌘+V</b>).</p>`;
+  document.querySelector("header").appendChild(box);
+  document.getElementById("mkdoc").onclick = () => makeDoc(payload.d);
 })();
+
+function esc(t){ return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+async function makeDoc(sentAt){
+  const date = new Date(sentAt).toLocaleString("uk-UA", {day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit"});
+  let html = `<h1>Бриф для сайту фотографа</h1><p><i>Надіслано ${esc(date)}</i></p>`;
+  let txt = buildText();
+  let cur = "";
+  all.forEach(({id, q, section}, i) => {
+    if (section !== cur) { cur = section; html += `<h2>${esc(section)}</h2>`; }
+    const a = document.getElementById(id).value.trim();
+    html += `<h3>${i+1}. ${esc(q)}</h3><p>${a ? esc(a).replace(/\n/g,"<br>") : "—"}</p>`;
+  });
+  try {
+    await navigator.clipboard.write([new ClipboardItem({
+      "text/html": new Blob([html], {type:"text/html"}),
+      "text/plain": new Blob([txt], {type:"text/plain"})
+    })]);
+  } catch(e) {
+    // Fallback: copy formatted content via a selection
+    const div = document.createElement("div");
+    div.innerHTML = html; div.style.cssText = "position:fixed;left:-9999px;top:0;background:#fff;color:#000";
+    document.body.appendChild(div);
+    const r = document.createRange(); r.selectNodeContents(div);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    document.execCommand("copy"); sel.removeAllRanges(); div.remove();
+  }
+  const w = window.open("https://docs.new", "_blank");
+  document.getElementById("docsteps").innerHTML = w
+    ? "Готово! У новій вкладці відкрився Google Doc — натисніть у ньому <b>Ctrl+V</b> (на Mac <b>⌘+V</b>)."
+    : `Відповіді скопійовано. <a href="https://docs.new" target="_blank" rel="noopener">Відкрийте новий Google Doc</a> і натисніть <b>Ctrl+V</b> (на Mac <b>⌘+V</b>).`;
+}
 document.getElementById("clear").onclick = () => {
   if (!confirm("Видалити всі відповіді? Це не можна скасувати.")) return;
   all.forEach(({id}) => { const t = document.getElementById(id); t.value = ""; autosize(t); });
