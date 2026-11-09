@@ -212,7 +212,9 @@ all.forEach(({id}) => {
   t.addEventListener("input", () => {
     autosize(t);
     syncErase(id);
-    savedEl.textContent = "Зберігаю…";
+    const st = document.getElementById(id + "-st");
+    if (st.querySelector(".undo")) { st.textContent = ""; st.style.color = ""; }
+    savedEl = "Зберігаю…";
     clearTimeout(saveTimer); saveTimer = setTimeout(save, 400);
   });
 });
