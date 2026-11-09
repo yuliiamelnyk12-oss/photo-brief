@@ -57,6 +57,8 @@ textarea:focus{border-color:var(--accent)}
 .btn{border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:11px 18px;font:500 15px Inter,sans-serif;cursor:pointer}
 .btn.ghost{background:transparent;color:var(--accent)}
 .btn.danger{border-color:var(--line);background:transparent;color:var(--muted)}
+body.view .mic,body.view .actions,body.view .hint,body.view .nosupport,body.view .status{display:none!important}
+body.view textarea{padding-right:12px;resize:none}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:.25s}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 @media (max-width:480px){.wrap{padding-top:28px}.q{padding:14px}.btn{flex:1 1 100%}}
@@ -84,7 +86,7 @@ textarea:focus{border-color:var(--accent)}
 
   <div class="actions">
     <h2>Готово?</h2>
-    <p>Натисніть «Надіслати» й оберіть месенджер. На комп'ютері відповіді скопіюються — просто вставте їх у повідомлення.</p>
+    <p>Натисніть «Надіслати» й оберіть Telegram. На комп'ютері посилання з відповідями скопіюється — просто вставте його в повідомлення.</p>
     <div class="btns">
       <button class="btn" id="share">Надіслати</button>
       <button class="btn danger" id="clear">Очистити все</button>
@@ -280,23 +282,70 @@ function showToast(msg){
   el.textContent = msg; el.classList.add("show");
   clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 3200);
 }
-async function copyText(){
-  const txt = buildText();
-  try { await navigator.clipboard.writeText(txt); showToast("Відповіді скопійовано — вставте їх у повідомлення"); }
-  catch(e){
-    const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta);
-    ta.select(); document.execCommand("copy"); ta.remove();
-    showToast("Відповіді скопійовано");
-  }
+/* ---------- Answers link ---------- */
+function b64url(bytes){
+  let bin = ""; for (let k = 0; k < bytes.length; k += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 }
+function unb64url(str){
+  const bin = atob(str.replace(/-/g,"+").replace(/_/g,"/"));
+  return Uint8Array.from(bin, c => c.charCodeAt(0));
+}
+async function pipe(bytes, stream){
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+}
+async function encodeAnswers(){
+  const a = {};
+  all.forEach(({id}) => { const v = document.getElementById(id).value.trim(); if (v) a[id] = v; });
+  const raw = new TextEncoder().encode(JSON.stringify({d: Date.now(), a}));
+  if (window.CompressionStream) return "z" + b64url(await pipe(raw, new CompressionStream("deflate-raw")));
+  return "p" + b64url(raw);
+}
+async function decodeAnswers(code){
+  let bytes = unb64url(code.slice(1));
+  if (code[0] === "z") bytes = await pipe(bytes, new DecompressionStream("deflate-raw"));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+async function copy(txt){
+  try { await navigator.clipboard.writeText(txt); }
+  catch(e){ const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+}
+const MAX_LINK = 3900; // Telegram message limit is 4096 characters
 document.getElementById("share").onclick = async () => {
-  const txt = buildText();
-  if (navigator.share) {
-    try { await navigator.share({title:"Бриф для сайту", text:txt}); return; }
+  save();
+  const url = location.origin + location.pathname + "#a=" + await encodeAnswers();
+  if (url.length > MAX_LINK) {
+    // Too long for one Telegram message: fall back to plain text
+    if (navigator.share) { try { await navigator.share({title:"Бриф для сайту", text:buildText()}); return; } catch(e){ if (e.name === "AbortError") return; } }
+    await copy(buildText()); showToast("Відповіді задовгі для посилання — скопійовано текстом, вставте його в повідомлення"); return;
+  }
+  if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+    try { await navigator.share({title:"Бриф для сайту", text:"Мої відповіді на бриф для сайту:", url}); return; }
     catch(e){ if (e.name === "AbortError") return; }
   }
-  copyText();
+  await copy(url);
+  showToast("Посилання з відповідями скопійовано — вставте його в Telegram");
 };
+
+/* ---------- View mode: opened from an answers link ---------- */
+(async () => {
+  const m = location.hash.match(/^#a=([zp][A-Za-z0-9_-]*)$/);
+  if (!m) return;
+  let payload;
+  try { payload = await decodeAnswers(m[1]); }
+  catch(e){ showToast("Не вдалося відкрити відповіді з посилання"); return; }
+  document.body.classList.add("view");
+  document.querySelector("header h1").textContent = "Відповіді на бриф";
+  const ps = document.querySelectorAll("header p");
+  ps[0].textContent = "Надіслано " + new Date(payload.d).toLocaleString("uk-UA", {day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit"}) + ".";
+  ps[1].textContent = "Це лише перегляд: зміни тут ніде не зберігаються.";
+  all.forEach(({id}) => {
+    const t = document.getElementById(id);
+    t.value = payload.a[id] || ""; t.readOnly = true; t.placeholder = "—"; autosize(t);
+  });
+  updateProgress();
+  document.getElementById("saved").textContent = "";
+})();
 document.getElementById("clear").onclick = () => {
   if (!confirm("Видалити всі відповіді? Це не можна скасувати.")) return;
   all.forEach(({id}) => { const t = document.getElementById(id); t.value = ""; autosize(t); });
