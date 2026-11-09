@@ -49,7 +49,12 @@ textarea:focus{border-color:var(--accent)}
 .mic:hover{transform:scale(1.05)}
 .mic.rec{background:var(--rec);color:#fff;animation:pulse 1.2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(192,57,43,.45)}100%{box-shadow:0 0 0 14px rgba(192,57,43,0)}}
-.status{font-size:13px;color:var(--rec);min-height:18px;margin-top:6px}
+.foot{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-top:6px}
+.status{font-size:13px;color:var(--rec);min-height:18px}
+.erase{flex:none;border:0;background:none;color:var(--muted);font:500 13px Inter,sans-serif;padding:2px 0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.erase:hover{color:var(--rec)}
+.undo{border:0;background:none;color:var(--accent);font:600 13px Inter,sans-serif;padding:0;margin-left:6px;cursor:pointer;text-decoration:underline}
+body.view .erase{display:none!important}
 .actions{margin-top:48px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
 .actions h2{font:600 28px/1.2 "Cormorant Garamond",Georgia,serif;margin:0 0 6px}
 .actions p{color:var(--muted);margin:0 0 16px;font-size:15px}
@@ -163,7 +168,7 @@ SECTIONS.forEach((s, si) => {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>
         </button>
       </div>
-      <div class="status" id="${id}-st"></div>`;
+      <div class="foot"><div class="status" id="${id}-st"></div><button type="button" class="erase" data-for="${id}" hidden>Стерти</button></div>`;
     sec.appendChild(div);
   });
   form.appendChild(sec);
@@ -182,14 +187,31 @@ function updateProgress(){
   document.getElementById("count").textContent = `Відповіді: ${done} з ${all.length}`;
   document.getElementById("bar").style.width = (done/all.length*100) + "%";
 }
+function syncErase(id){
+  document.querySelector(`.erase[data-for="${id}"]`).hidden = !document.getElementById(id).value.trim();
+}
+document.querySelectorAll(".erase").forEach(btn => btn.addEventListener("click", () => {
+  const id = btn.dataset.for, t = document.getElementById(id), st = document.getElementById(id + "-st");
+  if (activeId === id) stopRec();
+  const old = t.value;
+  t.value = ""; autosize(t); syncErase(id); save();
+  st.style.color = "var(--muted)";
+  st.innerHTML = 'Відповідь стерто.<button type="button" class="undo">Повернути</button>';
+  st.querySelector(".undo").onclick = () => {
+    t.value = old; autosize(t); syncErase(id); save(); st.textContent = ""; st.style.color = "";
+  };
+  clearTimeout(st._t); st._t = setTimeout(() => { if (st.querySelector(".undo")) { st.textContent = ""; st.style.color = ""; } }, 8000);
+}));
 function autosize(t){ t.style.height = "auto"; t.style.height = Math.max(96, t.scrollHeight + 2) + "px"; }
 
 all.forEach(({id}) => {
   const t = document.getElementById(id);
   t.value = data[id] || "";
   autosize(t);
+  syncErase(id);
   t.addEventListener("input", () => {
     autosize(t);
+    syncErase(id);
     savedEl.textContent = "Зберігаю…";
     clearTimeout(saveTimer); saveTimer = setTimeout(save, 400);
   });
@@ -237,6 +259,7 @@ function startRec(btn, id){
   r.onstart = () => {
     rec = r; activeBtn = btn; activeId = id;
     btn.classList.add("rec");
+    st.style.color = "";
     st.textContent = "● Слухаю… натисніть ще раз, щоб зупинити";
   };
   r.onresult = (e) => {
@@ -250,6 +273,7 @@ function startRec(btn, id){
     if (spoken) spoken = spoken.charAt(0).toUpperCase() + spoken.slice(1);
     t.value = (baseText ? baseText + (/[.!?…]$/.test(baseText) ? " " : ". ") : "") + spoken;
     autosize(t);
+    syncErase(id);
   };
   r.onerror = (e) => {
     const msg = {
