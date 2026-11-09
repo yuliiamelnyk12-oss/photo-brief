@@ -328,6 +328,7 @@ document.getElementById("share").onclick = async () => {
 };
 
 /* ---------- View mode: opened from an answers link ---------- */
+window.addEventListener("hashchange", () => location.reload());
 (async () => {
   const m = location.hash.match(/^#a=([zp][A-Za-z0-9_-]*)$/);
   if (!m) return;
