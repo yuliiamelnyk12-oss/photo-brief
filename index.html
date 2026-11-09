@@ -84,11 +84,9 @@ textarea:focus{border-color:var(--accent)}
 
   <div class="actions">
     <h2>Готово?</h2>
-    <p>Надішліть відповіді будь-яким зручним способом: скопіюйте й вставте в месенджер або завантажте файлом.</p>
+    <p>Натисніть «Надіслати» й оберіть месенджер. На комп'ютері відповіді скопіюються — просто вставте їх у повідомлення.</p>
     <div class="btns">
       <button class="btn" id="share">Надіслати</button>
-      <button class="btn ghost" id="copy">Скопіювати відповіді</button>
-      <button class="btn ghost" id="download">Завантажити файлом</button>
       <button class="btn danger" id="clear">Очистити все</button>
     </div>
   </div>
@@ -291,15 +289,6 @@ async function copyText(){
     showToast("Відповіді скопійовано");
   }
 }
-function download(){
-  const blob = new Blob([buildText()], {type:"text/plain;charset=utf-8"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = "бриф-фотограф.txt";
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-document.getElementById("copy").onclick = copyText;
-document.getElementById("download").onclick = download;
 document.getElementById("share").onclick = async () => {
   const txt = buildText();
   if (navigator.share) {
