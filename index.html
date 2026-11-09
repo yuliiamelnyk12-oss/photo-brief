@@ -214,7 +214,7 @@ all.forEach(({id}) => {
     syncErase(id);
     const st = document.getElementById(id + "-st");
     if (st.querySelector(".undo")) { st.textContent = ""; st.style.color = ""; }
-    savedEl = "Зберігаю…";
+    savedEl.textContent = "Зберігаю…";
     clearTimeout(saveTimer); saveTimer = setTimeout(save, 400);
   });
 });
