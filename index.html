@@ -215,6 +215,7 @@ all.forEach(({id}) => {
     const st = document.getElementById(id + "-st");
     if (st.querySelector(".undo")) { st.textContent = ""; st.style.color = ""; }
     savedEl.textContent = "Зберігаю…";
+    if (typeof fileRetry !== "undefined" && fileRetry) resetShareButton();
     clearTimeout(saveTimer); saveTimer = setTimeout(save, 400);
   });
 });
@@ -340,13 +341,91 @@ async function copy(txt){
   catch(e){ const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
 }
 const MAX_LINK = 3900; // Telegram message limit is 4096 characters
+
+/* ---------- Word file (.docx) for long answers ---------- */
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b){ let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zip(files){ // stored (no compression) zip
+  const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+  const DOS_DATE = ((2020 - 1980) << 9) | (1 << 5) | 1;
+  files.forEach(([name, text]) => {
+    const nb = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+    h.setUint16(10, 0, true); h.setUint16(12, DOS_DATE, true); h.setUint32(14, crc, true);
+    h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, nb.length, true); h.setUint16(28, 0, true);
+    parts.push(new Uint8Array(h.buffer), nb, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+    c.setUint16(12, 0, true); c.setUint16(14, DOS_DATE, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+    c.setUint16(28, nb.length, true); c.setUint32(42, offset, true);
+    central.push(new Uint8Array(c.buffer), nb);
+    offset += 30 + nb.length + data.length;
+  });
+  const cdSize = central.reduce((n, a) => n + a.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+  e.setUint32(12, cdSize, true); e.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], {type: DOCX_MIME});
+}
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+function xmlEsc(t){ return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,""); }
+function para(text, {size = 22, bold = false, italic = false, before = 0, after = 120, color = ""} = {}){
+  const rPr = `<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>${bold ? "<w:b/>" : ""}${italic ? "<w:i/>" : ""}${color ? `<w:color w:val="${color}"/>` : ""}<w:sz w:val="${size}"/></w:rPr>`;
+  const runs = String(text).split("\n").map((line, k) => (k ? "<w:br/>" : "") + `<w:t xml:space="preserve">${xmlEsc(line)}</w:t>`).join("");
+  return `<w:p><w:pPr><w:spacing w:before="${before}" w:after="${after}"/></w:pPr><w:r>${rPr}${runs}</w:r></w:p>`;
+}
+function buildDocx(){
+  const date = new Date().toLocaleString("uk-UA", {day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit"});
+  let body = para("Бриф для сайту фотографа", {size:40, bold:true, after:80}) + para("Надіслано " + date, {italic:true, color:"7D7168", after:240});
+  let cur = "";
+  all.forEach(({id, q, section}, i) => {
+    if (section !== cur) { cur = section; body += para(section, {size:30, bold:true, before:360, after:160, color:"A0644A"}); }
+    const a = document.getElementById(id).value.trim();
+    body += para(`${i+1}. ${q}`, {size:24, bold:true, before:200, after:80});
+    body += para(a || "—", {size:22, italic:!a, after:120});
+  });
+  const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+  return zip([
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`],
+    ["word/document.xml", doc]
+  ]);
+}
+const DOCX_NAME = "Бриф фотографа.docx";
+function docxFile(){ return new File([buildDocx()], DOCX_NAME, {type: DOCX_MIME}); }
+function downloadFile(file){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file); a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+let fileRetry = false; // some browsers need a fresh tap to share a file
+function resetShareButton(){ fileRetry = false; document.getElementById("share").textContent = "Надіслати"; }
+
 document.getElementById("share").onclick = async () => {
+  if (fileRetry) {
+    const file = docxFile(); resetShareButton();
+    try { await navigator.share({files:[file], title:"Бриф для сайту"}); }
+    catch(e){ if (e.name !== "AbortError") { downloadFile(file); showToast("Файл «" + DOCX_NAME + "» збережено — надішліть його в Telegram"); } }
+    return;
+  }
   save();
   const url = location.origin + location.pathname + "#a=" + await encodeAnswers();
   if (url.length > MAX_LINK) {
-    // Too long for one Telegram message: fall back to plain text
-    if (navigator.share) { try { await navigator.share({title:"Бриф для сайту", text:buildText()}); return; } catch(e){ if (e.name === "AbortError") return; } }
-    await copy(buildText()); showToast("Відповіді задовгі для посилання — скопійовано текстом, вставте його в повідомлення"); return;
+    // Too long for one Telegram message: send a Word file instead
+    const file = docxFile();
+    if (navigator.canShare && navigator.canShare({files:[file]})) {
+      try { await navigator.share({files:[file], title:"Бриф для сайту"}); return; }
+      catch(e){
+        if (e.name === "AbortError") return;
+        fileRetry = true; document.getElementById("share").textContent = "Надіслати файл";
+        showToast("Відповіді довгі, тому надішлемо їх файлом — натисніть «Надіслати файл»"); return;
+      }
+    }
+    downloadFile(file);
+    showToast("Відповіді довгі, тому збережено файл «" + DOCX_NAME + "» — надішліть його в Telegram");
+    return;
   }
   if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
     try { await navigator.share({title:"Бриф для сайту", text:"Мої відповіді на бриф для сайту:", url}); return; }
